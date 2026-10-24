@@ -196,7 +196,7 @@ end
 local function createLoadingNotice()
     local stale=environment.__CokeboysAuthNotice
     if type(stale)=="table" and type(stale.cleanup)=="function" then pcall(stale.cleanup) end
-    local manager={Closed=false,Gui=nil,State="checking",Previous=environment.LP_CUSTOM_LOADER,Deadline=os.clock()+90}
+    local manager={Closed=false,Gui=nil,State="checking",Previous=environment.LP_CUSTOM_LOADER,Deadline=os.clock()+110}
     local body,bar
     local messages={checking="Wait like a good boy… checking your access.",connecting="Connecting securely… almost there.",
         waiting="Lots of people are loading. Hang tight…",success="Access confirmed. Starting Cokeboys…",
@@ -344,6 +344,19 @@ local function parseResponse(response)
     return status,ok and type(data)=="table" and data or nil
 end
 
+local function sharedPreflightTransport(options,seconds,maximumBytes)
+    local sender=requestFunction()
+    if type(sender)~="function" then return nil,nil,"transport-missing" end
+    local ok,response,timedOut=requestBeforeDeadline(function() return sender(options) end,seconds)
+    if timedOut then return nil,nil,"request-timeout" end
+    if not ok or type(response)~="table" then return nil,nil,"transport-error" end
+    local body=response.Body or response.body
+    if type(body)~="string" or #body<2 or #body>maximumBytes then return nil,nil,"response-size" end
+    local status,data=parseResponse(response)
+    if type(data)~="table" then return status,nil,"response-json" end
+    return status,data,status~=200 and "http-error" or nil
+end
+
 local DENIALS={expired="Key has expired",banned="Access is banned",["wrong-device"]="Key is linked to another device",
     ["key-removed"]="Key is invalid or no longer available",["whitelist-removed"]="Your username is not whitelisted for this key"}
 local function authenticate(key,onWaiting)
@@ -357,7 +370,7 @@ local function authenticate(key,onWaiting)
     while ownsStartup() and os.clock()<deadline do
         ordinaryAttempts+=1
         local ok,response,timedOut=requestBeforeDeadline(function()
-            return sender({Url=START_URL,Method="POST",Headers={["Content-Type"]="application/json",["Cache-Control"]="no-store"},Body=encoded})
+            return sender({Url=START_URL,Method="POST",Headers={["Content-Type"]="application/json",["Cache-Control"]="no-store",["X-Cokeboys-Preflight"]="2"},Body=encoded})
         end,math.min(REQUEST_TIMEOUT,math.max(1,deadline-os.clock())))
         if timedOut then
             if ordinaryAttempts>=3 then return false,"Connection timed out. Your saved key was not changed.",nil,false end
@@ -366,7 +379,7 @@ local function authenticate(key,onWaiting)
         else
             local status,data=parseResponse(response)
             if data and data.success==true then
-                if status~=200 or type(data.loader_source)~="string" or #data.loader_source<100 or #data.loader_source>MAX_RESPONSE_BYTES
+                if status~=200 or data.preflight_version~=2 or type(data.loader_source)~="string" or #data.loader_source<100 or #data.loader_source>MAX_RESPONSE_BYTES
                     or type(data.legacy)~="table" or type(data.legacy.permanent)~="boolean" then
                     return false,"The access service returned an invalid response. Try again shortly.",nil,false
                 end
@@ -435,11 +448,30 @@ end
 local showKeyUi
 local function launchHandoff(key,delivery,setStatus,notice)
     if not ownsStartup() then return false,"Startup was cancelled." end
-    local compiledOk,loader=pcall(loadstring,delivery.loader_source)
+    local compiledOk,loader=false,nil
+    if delivery.preflight_version==2 then compiledOk,loader=pcall(loadstring,delivery.loader_source) end
     if not compiledOk or type(loader)~="function" then
         local message="The secure loader response could not be started."
         if notice then notice.cleanup() end
         setStatus(message,Color3.fromRGB(239,98,111),false)
+        return false,message
+    end
+    local preparedOk,prepared=pcall(loader)
+    local message="Access check could not finish. Your key is unchanged. Try again."
+    if preparedOk and type(prepared)=="table" and prepared.Version=="cb-provider-preflight-v2"
+        and type(prepared.Check)=="function" and type(prepared.Start)=="function" then
+        local checked,ready,checkMessage=pcall(prepared.Check,ownsStartup,sharedPreflightTransport)
+        if checked and ready==true and ownsStartup() then
+            loader=prepared.Start
+        else
+            if checked and type(checkMessage)=="string" then message=checkMessage end
+            if notice then notice.cleanup() end
+            if ownsStartup() then setStatus(message,Color3.fromRGB(239,98,111),false) end
+            return false,message
+        end
+    else
+        if notice then notice.cleanup() end
+        if ownsStartup() then setStatus(message,Color3.fromRGB(239,98,111),false) end
         return false,message
     end
     notice=notice or createLoadingNotice()
