@@ -788,7 +788,7 @@ local function showExecutorWarning(name)
     bolt.Name="BrandBoltAccent"
     bolt.Position=UDim2.fromOffset(91,0);bolt.Size=UDim2.fromOffset(18,22)
     bolt.TextColor3=Color3.fromRGB(255,210,31)
-    local version=label(card,"v2.2",12,true)
+    local version=label(card,"v2.3",12,true)
     version.Name="VersionBadge"
     version.Position=UDim2.new(1,-116,0,17);version.Size=UDim2.fromOffset(58,24)
     version.BackgroundTransparency=0;version.BackgroundColor3=Color3.fromRGB(20,20,23)
@@ -1075,7 +1075,7 @@ showKeyUi=function(initialKey,initialMessage)
     bolt.Name="BrandBoltAccent"
     bolt.Position=UDim2.fromOffset(91,0);bolt.Size=UDim2.fromOffset(18,22)
     bolt.TextColor3=Color3.fromRGB(255,210,31)
-    local version=label(card,"v2.2",12,true)
+    local version=label(card,"v2.3",12,true)
     version.Name="VersionBadge"
     version.Position=UDim2.new(1,-116,0,17);version.Size=UDim2.fromOffset(58,24)
     version.BackgroundTransparency=0;version.BackgroundColor3=Color3.fromRGB(20,20,23)
