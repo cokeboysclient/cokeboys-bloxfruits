@@ -27,32 +27,21 @@ local Players=game:GetService("Players")
 local LocalizationService=game:GetService("LocalizationService")
 
 local START_URL="https://cokeboys-luaprot-pilot.cokeboysclient.workers.dev/luaprot/experimental/start"
-local function createKeyProviderPicker(options)
+local function createKeyPortalLink(options)
     local gui,anchor=options.gui,options.anchor
+    local target="https://cokeboys-keys.pages.dev/"
     local inputService=game:GetService("UserInputService")
     local connections={}
     local popup,shield,escapeConnection
     local disposed=false
-    local expansionValue,expansionTween
-    local function expandTo(height)
-        if not options.expansion then return end
-        if expansionTween then expansionTween:Cancel();expansionTween=nil end
-        if disposed then options.expansion(0);return end
-        expansionTween=game:GetService("TweenService"):Create(expansionValue,TweenInfo.new(.16,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Value=height})
-        expansionTween:Play()
-    end
     local text={
-        English={"Choose a provider","3-hour key","24-hour key","Link copied. Paste it into your browser.","Copy this link into your browser:","Close"},
-        Spanish={"Elige un proveedor","Clave de 3 horas","Clave de 24 horas","Enlace copiado. Pégalo en tu navegador.","Copia este enlace en tu navegador:","Cerrar"},
-        Portuguese={"Escolha um provedor","Chave de 3 horas","Chave de 24 horas","Link copiado. Cole no navegador.","Copie este link no navegador:","Fechar"},
-        French={"Choisissez un fournisseur","Clé de 3 heures","Clé de 24 heures","Lien copié. Collez-le dans votre navigateur.","Copiez ce lien dans votre navigateur :","Fermer"},
-        Vietnamese={"Chọn nhà cung cấp","Key 3 giờ","Key 24 giờ","Đã sao chép liên kết. Dán vào trình duyệt.","Sao chép liên kết này vào trình duyệt:","Đóng"},
-        Indonesian={"Pilih penyedia","Key 3 jam","Key 24 jam","Tautan disalin. Tempel di browser Anda.","Salin tautan ini ke browser Anda:","Tutup"},
-        Filipino={"Pumili ng provider","3-oras na key","24-oras na key","Nakopya ang link. I-paste sa browser mo.","Kopyahin ang link na ito sa browser:","Isara"},
-    }
-    local providers={
-        {name="Linkvertise",url="https://tinyurl.com/cokeboys-linkvertise",duration=2},
-        {name="Work.ink",url="https://tinyurl.com/cokeboys-workink",duration=3},
+        English={"Link copied. Paste it into your browser.","Copy this link into your browser:"},
+        Spanish={"Enlace copiado. Pégalo en tu navegador.","Copia este enlace en tu navegador:"},
+        Portuguese={"Link copiado. Cole no navegador.","Copie este link no navegador:"},
+        French={"Lien copié. Collez-le dans votre navigateur.","Copiez ce lien dans votre navigateur :"},
+        Vietnamese={"Đã sao chép liên kết. Dán vào trình duyệt.","Sao chép liên kết này vào trình duyệt:"},
+        Indonesian={"Tautan disalin. Tempel di browser Anda.","Salin tautan ini ke browser Anda:"},
+        Filipino={"Nakopya ang link. I-paste sa browser mo.","Kopyahin ang link na ito sa browser:"},
     }
     local function words() return text[options.language()] or text.English end
     local function make(class,parent,props)
@@ -65,80 +54,50 @@ local function createKeyProviderPicker(options)
         local c=signal:Connect(fn);connections[#connections+1]=c;return c
     end
     local function close()
-        local wasOpen=shield~=nil
         if escapeConnection then escapeConnection:Disconnect();escapeConnection=nil end
         if shield then shield:Destroy() end
         shield=nil;popup=nil
-        anchor:SetAttribute("ProviderPickerOpen",false)
-        if wasOpen then expandTo(0) end
+        if options.expansion then options.expansion(0) end
     end
     local function place()
         if not popup or not shield then return end
         local size=shield.AbsoluteSize
         if size.X<1 or size.Y<1 then return end
         local attachment=options.attachment or anchor
-        local factor=options.scale and options.scale() or 1
+        local factor=math.max(.01,options.scale and options.scale() or 1)
         local width=math.min(attachment.AbsoluteSize.X,math.max(1,size.X-24))
-        local logicalHeight=popup:GetAttribute("PreferredHeight") or 116
-        local height=math.min(logicalHeight*factor,math.max(1,size.Y-24))
+        local height=math.min(140*factor,math.max(1,size.Y-24))
         local origin=attachment.AbsolutePosition-shield.AbsolutePosition
         local x=math.clamp(origin.X,12,math.max(12,size.X-width-12))
         local below=origin.Y+attachment.AbsoluteSize.Y+8*factor
         local y=below+height<=size.Y-12 and below or origin.Y-height-8
         popup.Position=UDim2.fromOffset(x,math.clamp(y,12,math.max(12,size.Y-height-12)))
-        popup.Size=UDim2.fromOffset(width/math.max(.01,factor),height/math.max(.01,factor))
+        popup.Size=UDim2.fromOffset(width/factor,height/factor)
         popup.UIScale.Scale=factor
-        popup.Visible=not expansionValue or expansionValue.Value>=logicalHeight+11
     end
-    local function open()
+    local function copyLink()
         if disposed or options.busy() or not gui.Enabled or not anchor.Parent or gui:FindFirstChild("LanguagePicker") then return end
-        if shield then close();return end
-        shield=make("TextButton",gui,{Name="KeyProviderPicker",Text="",AutoButtonColor=false,Active=true,Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=80})
-        popup=make("TextButton",shield,{Name="ProviderMenu",Text="",AutoButtonColor=false,Active=true,BackgroundColor3=Color3.fromRGB(16,15,20),BorderSizePixel=0,ZIndex=81})
-        popup:SetAttribute("PreferredHeight",116)
+        close()
+        local writer=options.clipboard or setclipboard or toclipboard
+        local ok,result=false,nil
+        if type(writer)=="function" then ok,result=pcall(writer,target) end
+        if ok and result~=false then options.status("✓ "..words()[1]);return end
+        shield=make("TextButton",gui,{Name="KeyPortalFallback",Text="",AutoButtonColor=false,Active=true,Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=80})
+        popup=make("TextButton",shield,{Name="PortalLink",Text="",AutoButtonColor=false,Active=true,BackgroundColor3=Color3.fromRGB(16,15,20),BorderSizePixel=0,ZIndex=81})
         make("UIScale",popup,{Scale=1})
         make("UICorner",popup,{CornerRadius=UDim.new(0,9)})
         make("UIStroke",popup,{Color=Color3.fromRGB(77,65,45),Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border})
+        make("TextLabel",popup,{Text=words()[2],Font=Enum.Font.GothamMedium,TextSize=13,TextColor3=Color3.fromRGB(238,236,243),TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,BackgroundTransparency=1,Position=UDim2.fromOffset(12,8),Size=UDim2.new(1,-24,0,40),ZIndex=82})
+        local link=make("TextBox",popup,{Name="PortalLinkFallback",Text=target,ClearTextOnFocus=false,TextEditable=false,MultiLine=true,TextWrapped=true,Font=Enum.Font.Code,TextSize=13,TextColor3=Color3.fromRGB(255,219,112),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,BackgroundColor3=Color3.fromRGB(9,9,13),BorderSizePixel=0,Position=UDim2.fromOffset(12,53),Size=UDim2.new(1,-24,0,75),ZIndex=82})
+        make("UICorner",link,{CornerRadius=UDim.new(0,5)})
         shield.Activated:Connect(close)
-        local chosen=false
-        for i,provider in ipairs(providers) do
-            local row=make("TextButton",popup,{Name=i==1 and "LinkvertiseOption" or "WorkinkOption",Text="",AutoButtonColor=false,BackgroundColor3=Color3.fromRGB(28,26,33),BorderSizePixel=0,Position=UDim2.fromOffset(8,8+(i-1)*53),Size=UDim2.new(1,-16,0,47),ZIndex=82})
-            make("UICorner",row,{CornerRadius=UDim.new(0,6)})
-            make("TextLabel",row,{Text=provider.name,Font=Enum.Font.GothamBold,TextSize=14,TextColor3=Color3.fromRGB(245,244,247),TextXAlignment=Enum.TextXAlignment.Left,BackgroundTransparency=1,Position=UDim2.fromOffset(12,3),Size=UDim2.new(1,-24,0,23),ZIndex=83})
-            make("TextLabel",row,{Text=words()[provider.duration],Font=Enum.Font.Gotham,TextSize=11,TextColor3=Color3.fromRGB(184,180,191),TextXAlignment=Enum.TextXAlignment.Left,BackgroundTransparency=1,Position=UDim2.fromOffset(12,25),Size=UDim2.new(1,-24,0,17),ZIndex=83})
-            row.MouseEnter:Connect(function() row.BackgroundColor3=Color3.fromRGB(49,39,28) end)
-            row.MouseLeave:Connect(function() row.BackgroundColor3=Color3.fromRGB(28,26,33) end)
-            row.MouseButton1Down:Connect(function() row.BackgroundColor3=Color3.fromRGB(65,47,27) end)
-            row.Activated:Connect(function()
-                if chosen or options.busy() then return end
-                chosen=true
-                local writer=options.clipboard or setclipboard or toclipboard
-                local ok,result=false,nil
-                if type(writer)=="function" then ok,result=pcall(writer,provider.url) end
-                if ok and result~=false then
-                    close();options.status("✓ "..provider.name..": "..words()[4])
-                else
-                    for _,child in ipairs(popup:GetChildren()) do if child:IsA("GuiObject") then child:Destroy() end end
-                    popup:SetAttribute("PreferredHeight",152)
-                    make("TextLabel",popup,{Text=words()[5],Font=Enum.Font.GothamMedium,TextSize=12,TextColor3=Color3.fromRGB(238,236,243),TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,BackgroundTransparency=1,Position=UDim2.fromOffset(12,8),Size=UDim2.new(1,-24,0,44),ZIndex=82})
-                    local url=make("TextBox",popup,{Name="ProviderLinkFallback",Text=provider.url,ClearTextOnFocus=false,TextEditable=false,MultiLine=true,TextWrapped=true,Font=Enum.Font.Code,TextSize=12,TextColor3=Color3.fromRGB(255,219,112),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,BackgroundColor3=Color3.fromRGB(9,9,13),BorderSizePixel=0,Position=UDim2.fromOffset(12,59),Size=UDim2.new(1,-24,0,80),ZIndex=82})
-                    expandTo(164)
-                    make("UICorner",url,{CornerRadius=UDim.new(0,5)});place()
-                end
-            end)
-        end
-        anchor:SetAttribute("ProviderPickerOpen",true)
-        expandTo(128)
-        escapeConnection=inputService.InputBegan:Connect(function(input,processed)
+        escapeConnection=inputService.InputBegan:Connect(function(input)
             if input.KeyCode==Enum.KeyCode.Escape then close() end
         end)
+        if options.expansion then options.expansion(152) end
         place()
     end
-    if options.expansion then
-        expansionValue=make("NumberValue",gui,{Name="ProviderExpansion",Value=0})
-        connect(expansionValue.Changed,function(height) options.expansion(height);place() end)
-    end
-    connect(anchor.Activated,open)
+    connect(anchor.Activated,copyLink)
     connect(anchor:GetPropertyChangedSignal("AbsolutePosition"),place)
     connect(anchor:GetPropertyChangedSignal("AbsoluteSize"),place)
     connect(gui:GetPropertyChangedSignal("AbsoluteSize"),place)
@@ -1323,7 +1282,7 @@ showKeyUi=function(initialKey,initialMessage)
     end
     submit.Activated:Connect(function() keyProviderPicker.close();submitKey() end)
     close.Activated:Connect(function() if busy then return end destroyGui() releaseStartup() end)
-    keyProviderPicker=createKeyProviderPicker({gui=gui,anchor=getKey,attachment=secondary,
+    keyProviderPicker=createKeyPortalLink({gui=gui,anchor=getKey,attachment=secondary,
         scale=function() return scale.Scale end,
         expansion=function(height) providerExpansion=height;updateLayout() end,
         language=activeLanguage,busy=function() return busy or not ownsStartup() end,
