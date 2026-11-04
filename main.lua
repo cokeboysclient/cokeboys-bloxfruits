@@ -506,21 +506,71 @@ local function preflightFailureMessage(message)
     return heading.."\n"..instruction.."\n"..(PREFLIGHT_HELP[activeLanguage()] or PREFLIGHT_HELP.English).."\n"..string.format(words.support,code)
 end
 
+local preflightState
+local function beginConnectionCheck()
+    preflightState={calls=0,preferred=nil,events={}}
+    environment.__CokeboysConnectionDiagnostics={Version="cb-connection-v1",Events=preflightState.events}
+end
+local function preflightAdapters()
+    local found={}
+    local function add(name,fn)
+        if type(fn)~="function" then return end
+        for _,item in ipairs(found) do if item.fn==fn then return end end
+        found[#found+1]={name=name,fn=fn}
+    end
+    add("syn.request",type(syn)=="table" and syn.request)
+    add("http.request",type(http)=="table" and http.request)
+    add("request",request)
+    add("http_request",http_request)
+    return found
+end
 local function sharedPreflightTransport(options,seconds,maximumBytes)
     lastPreflightFailure=nil
-    local sender=requestFunction()
-    if type(sender)~="function" then return nil,nil,"transport-missing" end
-    local ok,response,timedOut=requestBeforeDeadline(function() return sender(options) end,seconds)
-    if timedOut then return nil,nil,"request-timeout" end
-    if not ok or type(response)~="table" then
-        lastPreflightFailure={phase=options.Method=="GET" and "NODE" or "SDK",category=not ok and transportFailureCategory(response) or (response==nil and "no-response" or "response-format")}
-        return nil,nil,"transport-error"
+    if not preflightState then beginConnectionCheck() end
+    local state=preflightState
+    local discovery=options.Method=="GET" and (options.Url=="https://eu-1.luaprot.net/api/v1/nodes/get" or options.Url=="https://us-1.luaprot.net/api/v1/nodes/get")
+    local candidates=preflightAdapters()
+    if state.preferred then
+        for i,item in ipairs(candidates) do
+            if item.fn==state.preferred then table.remove(candidates,i);table.insert(candidates,1,item);break end
+        end
     end
-    local body=response.Body or response.body
-    if type(body)~="string" or #body<2 or #body>maximumBytes then return nil,nil,"response-size" end
-    local status,data=parseResponse(response)
-    if type(data)~="table" then return status,nil,"response-json" end
-    return status,data,status~=200 and "http-error" or nil
+    if #candidates==0 then return nil,nil,"transport-missing" end
+    local deadline=os.clock()+seconds
+    for index,item in ipairs(candidates) do
+        if state.calls>=3 then return nil,nil,"request-budget" end
+        local remaining=deadline-os.clock()
+        if remaining<=0 then return nil,nil,"request-timeout" end
+        state.calls+=1
+        local began=os.clock()
+        local ok,response,timedOut=requestBeforeDeadline(function() return item.fn(options) end,remaining)
+        local reason=timedOut and "request-timeout" or nil
+        local category
+        if not timedOut and (not ok or type(response)~="table") then
+            reason="transport-error"
+            category=not ok and transportFailureCategory(response) or (response==nil and "no-response" or "response-format")
+        end
+        local status,data
+        if not reason then
+            local body=response.Body or response.body
+            if type(body)~="string" or #body<2 or #body>maximumBytes then reason="response-size"
+            else status,data=parseResponse(response);if type(data)~="table" then reason="response-json" end end
+        end
+        local event={Stage=discovery and "NODE" or "SDK",Adapter=item.name,ElapsedMs=math.floor((os.clock()-began)*1000),Status=status,Category=category or reason or (status==200 and "ok" or "http-error")}
+        if discovery then event.Region=options.Url:find("eu-1",1,true) and "eu-1" or "us-1" end
+        if #state.events<8 then state.events[#state.events+1]=event end
+        if reason=="transport-error" then
+            lastPreflightFailure={phase=discovery and "NODE" or "SDK",category=category}
+        end
+        if not reason then
+            if discovery and status==200 and (data.node=="eu-1" or data.node=="us-1") then state.preferred=item.fn end
+            return status,data,status~=200 and "http-error" or nil
+        end
+        if not discovery or reason~="transport-error" or index>=2 or not candidates[index+1] or state.calls>=3 or deadline-os.clock()<0.25 then
+            return status,nil,reason
+        end
+    end
+    return nil,nil,"transport-missing"
 end
 
 local DENIALS={expired="Key has expired",banned="Access is banned",["wrong-device"]="Key is linked to another device",
@@ -866,6 +916,7 @@ local function launchHandoff(key,delivery,setStatus,notice)
     local message="Access check could not finish. Your key is unchanged. Try again."
     if preparedOk and type(prepared)=="table" and prepared.Version=="cb-provider-preflight-v2"
         and type(prepared.Check)=="function" and type(prepared.Start)=="function" then
+        beginConnectionCheck()
         local checked,ready,checkMessage=pcall(prepared.Check,ownsStartup,sharedPreflightTransport)
         if checked and ready==true and ownsStartup() then
             loader=prepared.Start
@@ -906,13 +957,14 @@ local function launchHandoff(key,delivery,setStatus,notice)
             if type(pending)=="table" and pending.Failed==true then notice.fail() return end
             task.wait(0.1)
         end
-        notice.fail("LuaProt took too long to respond. Please execute again.")
+        notice.fail("LuaProt is still starting. Wait, or rejoin before trying again.")
     end)
     task.spawn(function()
         local started,startError=pcall(loader)
         if not started then
             local rejoinRequired=type(startError)=="string" and string.find(startError,"Cokeboys: rejoin before changing access or builds",1,true)~=nil
-            notice.fail(rejoinRequired and "Key saved. Rejoin Roblox to use it." or "LuaProt failed to start. Please execute again.")
+            local pendingStart=type(startError)=="string" and string.find(startError,"LuaProt is already starting",1,true)~=nil
+            notice.fail(rejoinRequired and "Key saved. Rejoin Roblox to use it." or pendingStart and "LuaProt is still starting. Wait, or rejoin before trying again." or "LuaProt failed to start. Please execute again.")
             warn("Cokeboys: authenticated startup failed: "..tostring(startError))
         else
             handoffReturned=true
